@@ -18,6 +18,7 @@ workflow:
     lint: "uv run ruff check"
     format: "uv run ruff format --check"
     timeoutSeconds: 900
+  securityScan: 'pi -p --no-session --mode json "/security"'
 
 delivery:
   default: local
