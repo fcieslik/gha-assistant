@@ -1,0 +1,29 @@
+[project]
+name = "gha-assistant"
+version = "0.1.0"
+description = "Code-review agent for GitHub pull requests (LangGraph + Claude Agent SDK), run from GitHub Actions."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "claude-agent-sdk>=0.2.165",
+    "langgraph>=1.2.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
