@@ -14,7 +14,7 @@
 - **Współdzielenie kodu:** osobne repozytorium `gha-assistant` z composite action (`action.yml`). Repozytorium docelowe wywołuje je przez `uses: <owner>/gha-assistant@v1`.
 - **Wersjonowanie:** tagi `v1.0.0` i ruchomy tag `v1`.
 - **Checkout:** `actions/checkout` z `fetch-depth: 0`, żeby `git diff` do gałęzi bazowej działał.
-- **Zmienione pliki:** kod Pythona liczy `git diff --name-only origin/<base>...HEAD` przed uruchomieniem agenta. Agent dostaje listę plików i diff w prompcie.
+- **Zmienione pliki:** kod Pythona liczy `git diff --name-status -M origin/<base>...HEAD` przed uruchomieniem agenta i dzieli pliki na Intent (cel PR), kod do recenzji i ignorowane. Agent dostaje listę plików, a diff pobiera sam Agent swoim narzędziem tylko do odczytu.
 - **Uprawnienia agenta:** tylko odczyt (`Read`, `Grep`, `Glob`, `git diff`, `git log`, `git show`). Brak `git push`, `curl`, `gh`. Kod PR jest daną niezaufaną.
 - **Publikacja review:** robi kod Pythona, nie agent. Używa Pull Request Reviews API, zdarzenie `COMMENT`, jeden review z podsumowaniem i komentarzami przy liniach.
 - **Format wyniku modelu:** structured output (`Finding`: plik, linia, waga, treść, sugestia).
@@ -31,11 +31,12 @@ gha-assistant/
 └── src/gha_assistant/
     ├── state.py           # ReviewState (stan grafu)
     ├── graph.py           # graf LangGraph: tylko budowa i połączenia
+    ├── change.py          # zbieranie Change: pliki PR i ich podział (bez grafu)
     ├── nodes/             # jeden plik na węzeł
     │   ├── collect_input.py
     │   ├── run_agent.py
     │   └── publish.py
-    ├── github_io.py       # diff i publikacja review
+    ├── github_io.py       # publikacja review
     └── __main__.py        # punkt wejścia (CLI)
 ```
 
@@ -48,6 +49,12 @@ name: gha-assistant
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Filtr ścieżek w workflow: PR zmieniający tylko dokumentację nie uruchamia runnera.
+    # Te same wzorce dokumentacji są w `IGNORED_PATTERNS` (change.py), które decydują,
+    # co agent recenzuje w PR mieszanym. Trzymać oba miejsca w zgodzie ręcznie.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 permissions:
   contents: read
   pull-requests: write
@@ -67,6 +74,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+### Kanoniczne wzorce klasyfikacji (`change.py`)
+
+Reguły działają w kolejności: usunięty plik → `ignored`; Intent → `intent`; wzorzec ignorowany lub binarny → `ignored`; reszta → `code`.
+
+- **Intent:** `.scratch/**/*.md`, `docs/adr/**/*.md` (ADR wygrywa z `docs/**`).
+- **Ignorowane:** `**/*.lock`, `**/package-lock.json`, `**/pnpm-lock.yaml`, `**/dist/**`, `**/*.min.*`, `**/*.md` (w tym `README.md`, `CONTEXT.md`, `docs/agents/*.md`), `docs/**`, oraz binaria po rozszerzeniu (obrazki, czcionki, archiwa, pliki wykonywalne).
+
+Wzorce są stałymi w kodzie, bez konfiguracji per repozytorium.
+
+**Agent nie jest wymaganym status checkiem.** Review publikujemy jako `COMMENT`. Gdy filtr `paths-ignore` pominie workflow, wymagany check zostaje w stanie „Pending" i blokuje merge, więc agenta nie ustawiamy jako wymaganego w branch protection.
 
 ## Otwarte decyzje
 

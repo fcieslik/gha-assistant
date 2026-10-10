@@ -14,6 +14,11 @@ EXPECTED = {
     "deleted": {"intent": [], "code": [], "ignored": ["src/old.py"]},
     "renamed": {"intent": [], "code": ["src/new_name.py"], "ignored": []},
     "empty": {"intent": [], "code": [], "ignored": []},
+    "multi_pattern": {
+        "intent": ["docs/adr/0001.md", "docs/adr/0002.md"],
+        "code": ["src/app.py"],
+        "ignored": [".scratch/f/spec.md", "dist/app.min.js", "docs/adr/old.md"],
+    },
 }
 
 
@@ -52,5 +57,79 @@ def test_three_dot_diff_ignores_base_commits_made_after_merge(
     assert collect_change("origin/main", repo.path) == {
         "intent": [],
         "code": ["src/app.py", "src/new.py"],
+        "ignored": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "bucket"),
+    [
+        ("src/app.py", "code"),
+        (".scratch/change-collection/spec.md", "intent"),
+        (".scratch/change-collection/issues/02-ticket.md", "intent"),
+        ("docs/adr/0001-decision.md", "intent"),
+        ("README.md", "ignored"),
+        ("CONTEXT.md", "ignored"),
+        ("docs/agents/issue-tracker.md", "ignored"),
+        ("uv.lock", "ignored"),
+        ("frontend/package-lock.json", "ignored"),
+        ("pnpm-lock.yaml", "ignored"),
+        ("assets/logo.PNG", "ignored"),
+        ("dist/bundle.js", "ignored"),
+        ("web/dist/bundle.js", "ignored"),
+        ("static/app.min.js", "ignored"),
+    ],
+)
+def test_added_file_is_classified(
+    git_repo: Callable[[str], GitRepo],
+    path: str,
+    bucket: str,
+) -> None:
+    repo = git_repo("pr")
+    repo.write("base.txt", "base\n")
+    base = repo.commit("base")
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+
+    repo.git("switch", "-c", "pr")
+    repo.write(path, "content\n")
+    repo.commit("pr")
+
+    change = collect_change("origin/main", repo.path)
+
+    assert change[bucket] == [path]
+    assert sum(len(paths) for paths in change.values()) == 1
+
+
+def test_deleted_intent_file_is_ignored(git_repo: Callable[[str], GitRepo]) -> None:
+    repo = git_repo("pr")
+    repo.write("docs/adr/0001-decision.md", "decision\n")
+    base = repo.commit("base")
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+
+    repo.git("switch", "-c", "pr")
+    repo.git("rm", "-q", "docs/adr/0001-decision.md")
+    repo.commit("pr")
+
+    assert collect_change("origin/main", repo.path) == {
+        "intent": [],
+        "code": [],
+        "ignored": ["docs/adr/0001-decision.md"],
+    }
+
+
+def test_renamed_file_counts_under_new_path(git_repo: Callable[[str], GitRepo]) -> None:
+    repo = git_repo("pr")
+    repo.write("src/old_name.py", "print('same content, long enough to be a rename')\n")
+    repo.write("docs/adr/.keep", "")
+    base = repo.commit("base")
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+
+    repo.git("switch", "-c", "pr")
+    repo.git("mv", "src/old_name.py", "docs/adr/0002-renamed.md")
+    repo.commit("pr")
+
+    assert collect_change("origin/main", repo.path) == {
+        "intent": ["docs/adr/0002-renamed.md"],
+        "code": [],
         "ignored": [],
     }

@@ -1,0 +1,6 @@
+M	docs/adr/0001.md
+D	docs/adr/old.md
+D	.scratch/f/spec.md
+R100	src/a.py	docs/adr/0002.md
+A	dist/app.min.js
+A	src/app.py
