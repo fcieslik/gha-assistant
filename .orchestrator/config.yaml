@@ -1,0 +1,23 @@
+version: 1
+
+agents:
+  claude:
+    kind: claude-code
+    model: claude-haiku-5-5
+
+roles:
+  worker:
+    agent: claude
+    skill: implement
+
+workflow:
+  workerTimeoutSeconds: 1800
+  maxWorkerAttempts: 2
+  validation:
+    test: "uv run pytest"
+    lint: "uv run ruff check"
+    format: "uv run ruff format --check"
+    timeoutSeconds: 900
+
+delivery:
+  default: local
