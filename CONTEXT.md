@@ -15,3 +15,19 @@ _Avoid_: komentarz, issue, remark
 **Agent**:
 Wywołanie Claude Agent SDK wewnątrz węzła grafu. Czyta kod i zwraca Findings; niczego nie publikuje.
 _Avoid_: graf, pipeline
+
+**Change**:
+Zbiór plików faktycznie zmienionych w PR, czyli wynik diffu względem bazy.
+_Avoid_: files affected, zmiany
+
+**Intent**:
+Dokumenty opisujące, po co jest PR: Intent files z Change oraz tytuł i opis PR.
+_Avoid_: goal, cel PR
+
+**Intent file**:
+Plik w Change rozpoznany po konwencji ścieżek jako Spec, Ticket lub ADR.
+_Avoid_: plik markdown, dokumentacja
+
+**Ticket**:
+Jedna jednostka pracy do wykonania w PR, opisana własnym plikiem.
+_Avoid_: issue, task
