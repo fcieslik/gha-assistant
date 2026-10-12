@@ -1,10 +1,13 @@
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from gitrepo import GitRepo
 
-from gha_assistant.change import _parse_name_status, collect_change
+from gha_assistant import change as change_module
+from gha_assistant.change import _parse_name_status, collect_change, file_diff
 
 FIXTURES = Path(__file__).parent / "fixtures" / "name_status"
 
@@ -133,3 +136,75 @@ def test_renamed_file_counts_under_new_path(git_repo: Callable[[str], GitRepo]) 
         "code": [],
         "ignored": [],
     }
+
+
+def test_base_ref_that_looks_like_an_option_is_rejected(
+    git_repo: Callable[[str], GitRepo], tmp_path: Path
+) -> None:
+    repo = git_repo("pr")
+    repo.write("src/app.py", "print('hi')\n")
+    repo.commit("base")
+    pwned = tmp_path / "pwned"
+
+    with pytest.raises(ValueError, match="base_ref"):
+        collect_change(f"--output={pwned}", repo.path)
+
+    assert not pwned.exists()
+
+
+def test_empty_base_ref_is_rejected(git_repo: Callable[[str], GitRepo]) -> None:
+    repo = git_repo("pr")
+
+    with pytest.raises(ValueError, match="base_ref"):
+        collect_change("", repo.path)
+
+
+def test_git_diff_runs_with_a_timeout(
+    git_repo: Callable[[str], GitRepo], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = git_repo("pr")
+    seen: dict[str, Any] = {}
+
+    def hanging_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(change_module.subprocess, "run", hanging_run)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        collect_change("origin/main", repo.path)
+
+    assert seen["timeout"] == change_module.GIT_TIMEOUT_SECONDS
+
+
+def test_file_diff_is_limited_to_one_file_and_to_the_pr_changes(
+    git_repo: Callable[[str], GitRepo],
+) -> None:
+    repo = git_repo("pr")
+    repo.write("src/a.py", "a = 1\n")
+    repo.write("src/b.py", "b = 1\n")
+    base = repo.commit("base")
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+    repo.git("switch", "-c", "pr")
+    repo.write("src/a.py", "a = 2\n")
+    repo.write("src/b.py", "b = 2\n")
+    repo.commit("pr")
+
+    diff = file_diff("origin/main", repo.path, "src/a.py")
+
+    assert "-a = 1" in diff
+    assert "+a = 2" in diff
+    assert "b = " not in diff
+
+
+def test_file_diff_rejects_a_base_ref_that_looks_like_an_option(
+    git_repo: Callable[[str], GitRepo], tmp_path: Path
+) -> None:
+    repo = git_repo("pr")
+    repo.write("src/a.py", "a = 1\n")
+    repo.commit("base")
+
+    with pytest.raises(ValueError):
+        file_diff(f"--output={tmp_path / 'pwned'}", repo.path, "src/a.py")
+
+    assert not (tmp_path / "pwned").exists()

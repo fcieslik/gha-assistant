@@ -17,9 +17,10 @@
 - **Zmienione pliki:** kod Pythona liczy `git diff --name-status -M origin/<base>...HEAD` przed uruchomieniem agenta i dzieli pliki na Intent (cel PR), kod do recenzji i ignorowane. Agent dostaje listę plików, a diff pobiera sam Agent swoim narzędziem tylko do odczytu.
 - **Uprawnienia agenta:** tylko odczyt (`Read`, `Grep`, `Glob`, `git diff`, `git log`, `git show`). Brak `git push`, `curl`, `gh`. Kod PR jest daną niezaufaną.
 - **Publikacja review:** robi kod Pythona, nie agent. Używa Pull Request Reviews API, zdarzenie `COMMENT`, jeden review z podsumowaniem i komentarzami przy liniach.
+- **Komentarz ze statusem:** każdy run kończy się jednym komentarzem w rozmowie PR (issue comment), żeby zielony run nie wyglądał jak run bez wyniku: "brak kodu do sprawdzenia" albo "sprawdzono N plików" z podsumowaniem, także gdy nie ma uwag. Komentarz jest rozpoznawany po ukrytym znaczniku i autorze będącym botem, a kolejny run edytuje go w miejscu zamiast dodawać nowy; treść zawiera SHA commita i czas, bo nadpisanie gubi poprzedni wynik. Token ze zmiennej `GITHUB_TOKEN`; brak tokenu lub celu bez `--dry-run` kończy run błędem. PR z forka (token tylko do odczytu) jest poza zakresem.
 - **Format wyniku modelu:** structured output (`Finding`: plik, linia, waga, treść, sugestia).
 - **Testowanie:** głównie lokalnie przez `--dry-run`. Kod ma trzy części: `collect_input`, `run_agent`, `publish`. GitHub Actions służy do końcowego testu w repozytorium testowym, przed tagiem `v1`.
-- **Ochrona kosztów:** `timeout-minutes: 10` i `concurrency` z `cancel-in-progress: true`.
+- **Ochrona kosztów:** `timeout-minutes: 15` i `concurrency` z `cancel-in-progress: true`.
 
 ## Struktura repozytorium `gha-assistant`
 
@@ -36,7 +37,7 @@ gha-assistant/
     │   ├── collect_input.py
     │   ├── run_agent.py
     │   └── publish.py
-    ├── github_io.py       # publikacja review
+    ├── github_io.py       # komentarz ze statusem w PR (upsert); później Review
     └── __main__.py        # punkt wejścia (CLI)
 ```
 
@@ -64,7 +65,7 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:

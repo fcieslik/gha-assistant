@@ -31,3 +31,7 @@ _Avoid_: plik markdown, dokumentacja
 **Ticket**:
 Jedna jednostka pracy do wykonania w PR, opisana własnym plikiem.
 _Avoid_: issue, task
+
+**Status comment**:
+Jeden komentarz w rozmowie PR, który każdy run tworzy albo nadpisuje: status runa (np. brak kodu do sprawdzenia) i `summary`. Nie jest Review ani Findingiem.
+_Avoid_: Review, raport

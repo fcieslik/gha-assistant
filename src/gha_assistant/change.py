@@ -35,19 +35,46 @@ BINARY_SUFFIXES = frozenset(
 )  # fmt: skip
 
 
+GIT_TIMEOUT_SECONDS = 45
+
+
 def collect_change(base_ref: str, repo: Path) -> Change:
     """List the files changed by the PR checked out in `repo`.
 
     The three-dot diff compares against the merge base, so commits that
     reached `base_ref` after the PR branched off are left out.
     """
+    _check_base_ref(base_ref)
     result = subprocess.run(
         ["git", "-C", str(repo), "diff", "--name-status", "-M", f"{base_ref}...HEAD"],
         check=True,
         capture_output=True,
         text=True,
+        timeout=GIT_TIMEOUT_SECONDS,
     )
     return _parse_name_status(result.stdout)
+
+
+def file_diff(base_ref: str, repo: Path, path: str) -> str:
+    """The PR's diff of one file, same comparison as `collect_change`.
+
+    The reviewing agent has no `git`, so the diff goes into its prompt as data.
+    """
+    _check_base_ref(base_ref)
+    result = subprocess.run(
+        ["git", "-C", str(repo), "diff", f"{base_ref}...HEAD", "--", path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=GIT_TIMEOUT_SECONDS,
+    )
+    return result.stdout
+
+
+def _check_base_ref(base_ref: str) -> None:
+    # `base_ref` becomes part of a git argument; a leading dash would be read as an option.
+    if not base_ref or base_ref.startswith("-"):
+        raise ValueError(f"invalid base_ref: {base_ref!r}")
 
 
 def _parse_name_status(text: str) -> Change:
