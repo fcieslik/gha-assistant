@@ -9,6 +9,8 @@ This is a learning project. Goals and design decisions:
 
 ## Użycie w innym repozytorium
 
+Pełny opis krok po kroku (sekret, uprawnienia, rozwiązywanie problemów): [docs/USAGE.md](docs/USAGE.md).
+
 Workflow w repozytorium docelowym (`.github/workflows/gha-assistant.yml`):
 
 ```yaml
