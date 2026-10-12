@@ -64,6 +64,42 @@ def test_render_without_summary_has_no_empty_section() -> None:
     assert body.splitlines() == ["**gha-assistant:** status", "", "<sub>2026-10-12 14:30 UTC</sub>"]
 
 
+def test_render_lists_warnings_as_one_line_code_spans() -> None:
+    body = render_status_comment(
+        "status", head_sha=None, now=NOW, warnings=["pierwsze", "drugie `z` backtickiem"]
+    )
+
+    assert "**Ostrzeżenia:**" in body
+    assert "- `pierwsze`" in body
+    assert "- `drugie 'z' backtickiem`" in body
+
+
+def test_render_keeps_hostile_warning_text_inert() -> None:
+    hostile = "plik @octocat\n[link](http://x) <img src=x>\x1b[31m" + "a" * 500
+
+    body = render_status_comment("status", head_sha=None, now=NOW, warnings=[hostile])
+
+    (line,) = [ln for ln in body.splitlines() if ln.startswith("- ")]
+    assert line.startswith("- `plik @octocat [link](http://x) <img src=x>")
+    assert line.endswith("…`")
+    assert len(line) < 220
+    assert "\x1b" not in body
+
+
+def test_render_caps_the_number_of_warnings() -> None:
+    warnings = [f"w{n}" for n in range(github_io.MAX_WARNINGS_SHOWN + 3)]
+
+    body = render_status_comment("status", head_sha=None, now=NOW, warnings=warnings)
+
+    assert f"- `w{github_io.MAX_WARNINGS_SHOWN - 1}`" in body
+    assert f"- `w{github_io.MAX_WARNINGS_SHOWN}`" not in body
+    assert "- i 3 więcej" in body
+
+
+def test_render_without_warnings_has_no_warnings_section() -> None:
+    assert "Ostrzeżenia" not in render_status_comment("status", head_sha=None, now=NOW)
+
+
 def test_status_variants() -> None:
     assert no_code_status(ignored=3, intent=1) == (
         "brak kodu do sprawdzenia (pominięte pliki: 3, pliki Intent: 1)"

@@ -14,12 +14,12 @@
 - **Współdzielenie kodu:** osobne repozytorium `gha-assistant` z composite action (`action.yml`). Repozytorium docelowe wywołuje je przez `uses: <owner>/gha-assistant@v1`.
 - **Wersjonowanie:** tagi `v1.0.0` i ruchomy tag `v1`.
 - **Checkout:** `actions/checkout` z `fetch-depth: 0`, żeby `git diff` do gałęzi bazowej działał.
-- **Zmienione pliki:** kod Pythona liczy `git diff --name-status -M origin/<base>...HEAD` przed uruchomieniem agenta i dzieli pliki na Intent (cel PR), kod do recenzji i ignorowane. Agent dostaje listę plików, a diff pobiera sam Agent swoim narzędziem tylko do odczytu.
-- **Uprawnienia agenta:** tylko odczyt (`Read`, `Grep`, `Glob`, `git diff`, `git log`, `git show`). Brak `git push`, `curl`, `gh`. Kod PR jest daną niezaufaną.
+- **Zmienione pliki:** kod Pythona liczy `git diff --name-status -M origin/<base>...HEAD` przed uruchomieniem agenta i dzieli pliki na Intent (cel PR), kod do recenzji i ignorowane. Diff każdego pliku kod dokłada do promptu jako dane; agent doczytuje resztę narzędziami tylko do odczytu.
+- **Uprawnienia agenta:** tylko odczyt (`Read`, `Grep`, `Glob`), bez `Bash`, więc bez `git`, `git push`, `curl` i `gh`. Kod PR jest daną niezaufaną.
 - **Publikacja review:** robi kod Pythona, nie agent. Używa Pull Request Reviews API, zdarzenie `COMMENT`, jeden review z podsumowaniem i komentarzami przy liniach.
 - **Komentarz ze statusem:** każdy run kończy się jednym komentarzem w rozmowie PR (issue comment), żeby zielony run nie wyglądał jak run bez wyniku: "brak kodu do sprawdzenia" albo "sprawdzono N plików" z podsumowaniem, także gdy nie ma uwag. Komentarz jest rozpoznawany po ukrytym znaczniku i autorze będącym botem, a kolejny run edytuje go w miejscu zamiast dodawać nowy; treść zawiera SHA commita i czas, bo nadpisanie gubi poprzedni wynik. Token ze zmiennej `GITHUB_TOKEN`; brak tokenu lub celu bez `--dry-run` kończy run błędem. PR z forka (token tylko do odczytu) jest poza zakresem.
 - **Format wyniku modelu:** structured output (`Finding`: plik, linia, waga, treść, sugestia).
-- **Testowanie:** głównie lokalnie przez `--dry-run`. Kod ma trzy części: `collect_input`, `run_agent`, `publish`. GitHub Actions służy do końcowego testu w repozytorium testowym, przed tagiem `v1`.
+- **Testowanie:** głównie lokalnie przez `--dry-run`. Graf ma osobne nody dla zbierania wejścia, recenzentów, walidacji, weryfikacji, zakończenia Review i publikacji (patrz „Przepływ grafu"). GitHub Actions służy do końcowego testu w repozytorium testowym, przed tagiem `v1`.
 - **Ochrona kosztów:** `timeout-minutes: 15` i `concurrency` z `cancel-in-progress: true`.
 
 ## Struktura repozytorium `gha-assistant`
@@ -33,12 +33,22 @@ gha-assistant/
     ├── state.py           # ReviewState (stan grafu)
     ├── graph.py           # graf LangGraph: tylko budowa i połączenia
     ├── change.py          # zbieranie Change: pliki PR i ich podział (bez grafu)
+    ├── finding.py         # Finding i Verdict (jeden kształt na każdym etapie)
+    ├── agent.py           # jedyne wejście do Claude Agent SDK: run_agent, retry, modele
+    ├── limits.py          # wszystkie limity jednego runa i budżet czasu
+    ├── prompts/           # prompt systemowy na agenta + rules.md (wspólne zasady)
     ├── nodes/             # jeden plik na węzeł
     │   ├── collect_input.py
-    │   ├── run_agent.py
+    │   ├── nothing_to_review.py
+    │   ├── review_code.py        # Agent, jeden na plik
+    │   ├── review_intent.py      # Agent, jeden na PR
+    │   ├── validate_findings.py  # czysta funkcja + routing
+    │   ├── verify_finding.py     # Agent, jeden na Finding `high`
+    │   ├── judge_findings.py     # czysta funkcja: zamyka Review
+    │   ├── degradable.py         # wspólna próba z retry, timeoutem i degradacją
     │   └── publish.py
     ├── github_io.py       # komentarz ze statusem w PR (upsert); później Review
-    └── __main__.py        # punkt wejścia (CLI)
+    └── __main__.py        # punkt wejścia (CLI), jeszcze nie ma
 ```
 
 ## Plik w repozytorium docelowym
@@ -93,5 +103,18 @@ Wzorce są stałymi w kodzie, bez konfiguracji per repozytorium.
 2. **Klucz LLM.**
    - Opcja A: sekret `ANTHROPIC_API_KEY` w każdym repozytorium (skrypt `gh secret set`).
    - Opcja B: AWS Bedrock + OIDC, bez kluczy w repozytoriach.
-3. **Połączenie LangGraph z Agent SDK.** Do ustalenia: czy węzeł `run_agent` wywołuje Agent SDK jako jedną funkcję `run_agent(prompt) -> list[Finding]`, czy Agent SDK pełni inną rolę w grafie.
+3. **Połączenie LangGraph z Agent SDK.** _Zamknięta._ Node z modelem to jedno wywołanie `agent.run_agent(...)` ze structured output; pętlę narzędzi prowadzi SDK, a LangGraph orkiestruje: fan-out (`Send`), routing, retry, timeout i degradację. Brak pętli ReAct w LangGraph i brak subagentów SDK. `agent.py` jest jedynym modułem, który importuje SDK.
 4. **Nazwa konta (`<owner>`) i repozytorium testowego.**
+
+## Przepływ grafu
+
+Szczegółowy diagram i stan nodów: `docs/ARCHITECTURE.md`. Limity i budżet czasu: `src/gha_assistant/limits.py`.
+
+1. **`collect_input`** liczy Change (`git diff`). Bez kodu do recenzji graf kończy się w `nothing_to_review`.
+2. **Recenzenci, równolegle:** `review_code` raz na plik (Haiku) oraz `review_intent` raz na PR, tylko gdy są Intent files (Haiku). Zwracają Candidates.
+3. **`validate_findings`** (kod, bez modelu) odrzuca Candidates wskazujące miejsca, których nie ma, i duplikaty z tego samego miejsca.
+4. **`verify_finding`** (Sonnet) sprawdza osobno każdy Finding `high` (max 10) i zwraca Verdict: `confirmed`, `refuted` albo `inconclusive`. Pozostałe Findings idą dalej niezweryfikowane.
+5. **`judge_findings`** (kod, bez modelu) zamyka Review: odrzuca Findings z Verdictem `refuted`, sortuje wg wagi, tnie do 15 i buduje `summary` z liczb.
+6. **`publish`** zostawia jeden komentarz ze statusem, `summary` i ostrzeżeniami o degradacji.
+
+Awaria jednego recenzenta lub weryfikatora po retry nie kasuje reszty: node zapisuje ostrzeżenie (albo Verdict `inconclusive`), a komentarz je pokazuje. Błąd trwały (zły klucz API) kończy run błędem, bez komentarza.

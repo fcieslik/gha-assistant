@@ -9,8 +9,20 @@ To, co publikujemy do PR: jedno podsumowanie plus lista Findings.
 _Avoid_: raport, report
 
 **Finding**:
-Pojedyncza uwaga do kodu: plik, linia, waga, treść, sugestia.
+Pojedyncza uwaga do kodu: plik, linia, waga, treść, sugestia. Ten sam kształt na każdym etapie grafu. Ma `source` (`code` albo `spec`), a uwaga ze `source` `spec` ma też `spec_ref` (Intent file i kryterium). Uwaga bez pliku i linii jest uwagą ogólną. `id` i `source` nadaje kod, nigdy model.
 _Avoid_: komentarz, issue, remark
+
+**Candidate**:
+Finding prosto od recenzenta (`review_code`, `review_intent`), jeszcze niezwalidowany. Staje się Findingiem w Review dopiero po `validate_findings` i `judge_findings`.
+_Avoid_: kandydat na komentarz, draft
+
+**Verdict**:
+Wynik sprawdzenia jednego Findingu `high` przez `verify_finding`: `confirmed`, `refuted` albo `inconclusive`, z krótkim uzasadnieniem, powiązany z Findingiem po `id`. `refuted` wyrzuca Finding z Review; `inconclusive` oznacza też, że weryfikacja się nie powiodła mimo ponowień.
+_Avoid_: ocena, decyzja sędziego
+
+**Judge**:
+Node `judge_findings`: zamyka Review. W v1 to czysta funkcja bez modelu (odrzuca `refuted`, sortuje wg wagi, tnie do limitu, buduje `summary`). Sędzia z modelem (scalanie duplikatów semantycznych, odrzucanie stylu) jest odłożony, patrz `.scratch/review-agent/issues/08-judge-findings.md`.
+_Avoid_: reviewer, ewaluator
 
 **Agent**:
 Wywołanie Claude Agent SDK wewnątrz węzła grafu. Czyta kod i zwraca Findings; niczego nie publikuje.

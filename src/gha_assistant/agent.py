@@ -26,48 +26,17 @@ from claude_agent_sdk import (
 from langgraph.errors import NodeTimeoutError
 from langgraph.types import RetryPolicy
 
+from gha_assistant.limits import AGENT_MAX_ATTEMPTS, DEFAULT_MAX_TURNS, MAX_BUDGET_USD
+
 REVIEW_MODEL = "claude-haiku-5-5"  # review_code, review_intent: many cheap reads
 VERIFY_MODEL = "claude-sonnet-5-5"  # verify_finding: checks one claim, must be reliable
 FALLBACK_MODEL = "claude-sonnet-5-5"
 
 READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
-DEFAULT_MAX_TURNS = 30
 EFFORT = "medium"  # every agent, so cost and latency do not depend on the model default
-# Hard cap on one run (one attempt), enforced by the CLI; a run that hits it ends with
-# `error_max_budget_usd`, which is permanent (a retry would only spend it again).
-MAX_BUDGET_USD = 0.5
-
-# `review_intent` is the one agent that is meant to go through every changed file in one
-# run, so it gets more room than the per-file and per-Finding agents (30 turns, $0.5).
-REVIEW_INTENT_MAX_TURNS = 100
-REVIEW_INTENT_MAX_BUDGET_USD = 0.75
-
-# Per attempt, enforced on the node (`add_node(timeout=...)`), not here: LangGraph
-# raises NodeTimeoutError there, and the cancelled `query()` takes the CLI with it
-# (spike: the child process was gone right after the cancellation).
-NODE_TIMEOUT_SECONDS = 120
-
-# `review_intent` goes through every changed file in one run (up to 100 turns), so one
-# attempt gets 5 min. AGENT_MAX_ATTEMPTS attempts take 10 min in the worst case, in
-# parallel with the `review_code` workers; verify, judge and publish still have to fit in
-# the remaining 5 of the runner's 15 min. A run cut short by this is retried and costs
-# another budget (up to 2 x REVIEW_INTENT_MAX_BUDGET_USD). 100 turns of Haiku can take
-# longer than 5 min: not measured, only one small file set was tried.
-REVIEW_INTENT_TIMEOUT_SECONDS = 300
-
-# Time budget. One attempt gets 2 min and AGENT_RETRY allows 2 attempts, so a node can
-# take 4 min plus backoff. `review_code` workers run `max_concurrency` (5) at a time, so
-# N files take ceil(N/5) rounds. Measured without failures: ~6 s for a file with a 9-line
-# diff (Haiku, one sample; big files are not measured). Assuming up to a minute per file,
-# a round is about a minute and 15 min (`timeout-minutes`) holds roughly 75 files before
-# the later stages take their share. The worst case (every file of a round times out
-# twice: 4 min a round) exceeds 15 min from 4 rounds, i.e. above 15 files. We do not
-# promise it: the runner kills the process and nothing is published. The stages after
-# review_code are added to this estimate in tickets 06-09.
-AGENT_MAX_ATTEMPTS = 2
 
 # Retries inside the CLI. Spike: with the default, a refused connection was still being
-# retried after 150 s (longer than NODE_TIMEOUT_SECONDS, so the node timeout fired first
+# retried after 150 s (longer than `limits.NODE_TIMEOUT_SECONDS`, so the node timeout fired first
 # and then AGENT_RETRY started the whole session over); with 0 it failed in 1.1 s and
 # with 1 in 1.5 s. Set explicitly: a few cheap retries inside the session are kept (they
 # are what absorbs a 429/529 without redoing the turns), but bounded, so the layers
@@ -93,7 +62,7 @@ class InvalidAgentOutput(Exception):
 # wrong rather than the request being doomed. `error_max_structured_output_retries` is the
 # CLI's own version of `InvalidAgentOutput`. `error_during_execution` is "an error
 # interrupted the loop (e.g. a cancelled request)"; its cause is unknown, and one more
-# attempt is bounded by `AGENT_MAX_ATTEMPTS`. `error_max_turns` and `error_max_budget_usd`
+# attempt is bounded by `limits.AGENT_MAX_ATTEMPTS`. `error_max_turns` and `error_max_budget_usd`
 # are absent on purpose: the same prompt would hit the same limit.
 _TRANSIENT_RESULT_SUBTYPES = frozenset(
     {"error_max_structured_output_retries", "error_during_execution"}

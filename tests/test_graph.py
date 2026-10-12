@@ -12,7 +12,7 @@ from fake_agent import FakeAgent
 from fake_github import FakeGitHub
 from gitrepo import GitRepo
 
-from gha_assistant import agent
+from gha_assistant import agent, limits
 from gha_assistant import graph as graph_module
 from gha_assistant.change import Change, collect_change
 from gha_assistant.graph import build_graph
@@ -619,7 +619,7 @@ def test_no_findings_goes_straight_to_publish(
     async def silent_review_code(payload: dict[str, str]) -> dict[str, list[Any]]:
         return {"candidates": []}
 
-    monkeypatch.setattr(graph_module, "review_code", silent_review_code)
+    monkeypatch.setattr(graph_module, "make_review_code", lambda retry, timeout: silent_review_code)
     repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py"])
 
     executed = _executed_nodes(_pr_input(repo))
@@ -730,7 +730,9 @@ def test_finding_about_a_file_outside_the_change_never_reaches_the_review(
     async def inventive_review_code(payload: dict[str, str]) -> dict[str, list[Any]]:
         return {"candidates": [real, invented]}
 
-    monkeypatch.setattr(graph_module, "review_code", inventive_review_code)
+    monkeypatch.setattr(
+        graph_module, "make_review_code", lambda retry, timeout: inventive_review_code
+    )
     repo = _pr_with_files(git_repo, code=["src/a.py"])
 
     result = _invoke(_pr_input(repo))
@@ -759,7 +761,7 @@ def test_concurrency_is_bounded_by_the_constant(
         return {"candidates": []}
 
     monkeypatch.setattr(graph_module, "MAX_CONCURRENCY", 2)
-    monkeypatch.setattr(graph_module, "review_code", slow_review_code)
+    monkeypatch.setattr(graph_module, "make_review_code", lambda retry, timeout: slow_review_code)
     repo = _pr_with_files(git_repo, code=[f"src/m{n}.py" for n in range(6)])
 
     _invoke(_pr_input(repo))
@@ -896,6 +898,70 @@ def test_retrying_one_file_does_not_rerun_the_others(
     assert [len(fake_agent.calls_for(p)) for p in ("src/a.py", "src/b.py", "src/c.py")] == [1, 2, 1]
 
 
+def test_one_file_that_keeps_failing_leaves_the_other_files_and_a_warning(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py", "src/c.py"])
+
+    def respond(call: dict[str, Any]) -> dict[str, Any] | Exception:
+        if call["prompt"].startswith("File: src/b.py"):
+            return _api_error(529)
+        return {"findings": [{"severity": "low", "message": "m", "line": 1, "evidence": ""}]}
+
+    fake_agent.respond = respond
+
+    result = _invoke(_pr_input(repo))
+
+    assert len(fake_agent.calls_for("src/b.py")) == 2  # retried, then given up
+    assert sorted(f["file"] for f in result["candidates"]) == ["src/a.py", "src/c.py"]
+    (warning,) = result["warnings"]
+    assert "review_code" in warning and "src/b.py" in warning and "ResultError" in warning
+    body = fake_github.comments[0]["body"]
+    assert "uwagi: 2" in body
+    assert "Ostrzeżenia" in body and "src/b.py" in body
+
+
+def test_every_file_failing_does_not_look_like_a_clean_review(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py"])
+    fake_agent.respond = lambda call: _api_error(529)
+
+    executed = _executed_nodes(_pr_input(repo))
+
+    assert _count(executed, "judge_findings") == 0  # no Findings: straight to publish
+    (comment,) = fake_github.comments
+    assert "brak uwag" in comment["body"]
+    assert "Ostrzeżenia" in comment["body"]
+    assert "src/a.py" in comment["body"] and "src/b.py" in comment["body"]
+
+
+def test_a_permanent_failure_in_one_file_ends_the_run_without_a_comment(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py"])
+    fake_agent.respond = lambda call: (
+        _api_error(401) if call["prompt"].startswith("File: src/b.py") else {"findings": []}
+    )
+
+    with pytest.raises(ResultError):
+        _invoke(_pr_input(repo))
+
+    assert fake_github.comments == []
+
+
 def test_agent_run_that_hangs_hits_the_node_timeout_and_is_retried(
     git_repo: Callable[[str], GitRepo],
     monkeypatch: pytest.MonkeyPatch,
@@ -984,8 +1050,8 @@ def test_review_intent_gets_the_blocks_its_prompt_describes_and_the_wide_limits(
     # The Intent file is read with a tool: its content is not in the message.
     assert "# .scratch/feature/spec.md" not in prompt
     assert call["model"] == agent.REVIEW_MODEL
-    assert call["max_turns"] == agent.REVIEW_INTENT_MAX_TURNS == 100
-    assert call["max_budget_usd"] == agent.REVIEW_INTENT_MAX_BUDGET_USD == 0.75
+    assert call["max_turns"] == limits.REVIEW_INTENT_MAX_TURNS == 100
+    assert call["max_budget_usd"] == limits.REVIEW_INTENT_MAX_BUDGET_USD == 0.75
     assert call["cwd"] == str(repo.path)
 
 
@@ -1032,7 +1098,9 @@ def test_review_intent_that_keeps_failing_degrades_to_a_warning(
     (warning,) = result["warnings"]
     assert "review_intent" in warning
     assert "ResultError" in warning
-    assert len(fake_github.comments) == 1
+    (comment,) = fake_github.comments
+    assert "Ostrzeżenia" in comment["body"]
+    assert "review_intent nie powiódł się" in comment["body"]
 
 
 def test_review_intent_that_hangs_hits_its_own_timeout_and_degrades(

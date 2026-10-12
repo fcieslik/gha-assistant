@@ -1,6 +1,6 @@
 # Architektura: przepływ grafu LangGraph
 
-Stan na ticket 08 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
+Stan na ticket 09 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`, limity: `src/gha_assistant/limits.py`.
 
 ```
                               START
@@ -54,13 +54,13 @@ Stan na ticket 08 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
                                 END
 ```
 
-## Co jest prawdziwe, a co stubem
+## Stan nodów (wszystkie prawdziwe, bez stubów)
 
 | Node | Stan | Ticket |
 |---|---|---|
 | `collect_input` | prawdziwy | 01–03 |
 | `nothing_to_review`, `publish` | prawdziwe (upsert komentarza, `dry_run`) | 02 |
-| `review_code` | prawdziwy: Haiku, `AGENT_RETRY`, timeout 120 s | 04 |
+| `review_code` | prawdziwy: Haiku, `AGENT_RETRY`, timeout 120 s, po wyczerpaniu ostrzeżenie z nazwą pliku (graf zagnieżdżony z `error_handler`) | 04, 09 |
 | `validate_findings` | prawdziwy, czysta funkcja | 05 |
 | `review_intent` | prawdziwy: Haiku, jedno przejście (100 tur, $0.75), `AGENT_RETRY`, timeout 300 s, po wyczerpaniu ostrzeżenie (graf zagnieżdżony z `error_handler`) | 06 |
 | `verify_finding` | prawdziwy: Sonnet, tylko Findings `high`, `AGENT_RETRY`, timeout 120 s, po wyczerpaniu `inconclusive` + ostrzeżenie (graf zagnieżdżony z `error_handler`) | 07 |
@@ -70,7 +70,10 @@ Stan na ticket 08 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 
 | Element | Wartość |
 |---|---|
-| Współbieżność | `max_concurrency=5` |
+| Limity i budżet czasu | wszystkie w `limits.py`: `MAX_CONCURRENCY=5`, timeouty prób (120 s, `review_intent` 300 s), 2 próby, `MAX_VERIFICATIONS=10`, `MAX_FINDINGS=15`, `MAX_DIFF_CHARS` |
+| Czas | bez awarii ok. 7 min dla 30 plików; najgorszy przypadek (każda próba do timeoutu) przekracza 15 min i nie jest obiecany |
+| Degradacja | wspólny `compile_attempt` (`nodes/degradable.py`): po wyczerpaniu retry ostrzeżenie (`review_code`, `review_intent`) albo Verdict `inconclusive` (`verify_finding`); błąd trwały przerywa run |
+| Ostrzeżenia | `publish` pokazuje je w komentarzu (max 10, każde jako jedna linia w code span), bo `judge_findings` bywa pomijany |
 | Reducery | `candidates`, `verdicts`, `warnings` (łączenie list) |
 | Limit weryfikacji | tylko Findings `high`, max 10; `medium`, `low` i `high` ponad limit idą do `judge_findings` niezweryfikowane |
 | Limit Review | `MAX_FINDINGS = 15`, zostają najpoważniejsze |

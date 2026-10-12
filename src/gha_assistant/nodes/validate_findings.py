@@ -5,11 +5,8 @@ from typing import Literal
 from langgraph.types import Send
 
 from gha_assistant.finding import SEVERITY_RANK, Finding
+from gha_assistant.limits import MAX_VERIFICATIONS
 from gha_assistant.state import ReviewState
-
-# Only `high` Findings are verified, and at most this many; every other Finding goes on
-# to the end of the review unverified.
-MAX_VERIFICATIONS = 10
 
 
 def validate_findings(state: ReviewState) -> ReviewState:

@@ -1,10 +1,8 @@
 from collections import Counter
 
 from gha_assistant.finding import SEVERITY_RANK, Finding, Verdict
+from gha_assistant.limits import MAX_FINDINGS
 from gha_assistant.state import ReviewState
-
-# At most this many Findings reach the Review; the most severe ones win.
-MAX_FINDINGS = 15
 
 
 def judge_findings(state: ReviewState) -> ReviewState:

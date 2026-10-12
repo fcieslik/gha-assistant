@@ -20,7 +20,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk import query as real_query
 from langgraph.errors import NodeTimeoutError
 
-from gha_assistant import agent
+from gha_assistant import agent, limits
 from gha_assistant.agent import (
     FALLBACK_MODEL,
     READ_ONLY_TOOLS,
@@ -120,8 +120,8 @@ def test_options_allow_reading_only_and_ignore_the_reviewed_repos_settings(
 def test_a_node_can_raise_the_turn_and_budget_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     options = _options_for(
         monkeypatch,
-        max_turns=agent.REVIEW_INTENT_MAX_TURNS,
-        max_budget_usd=agent.REVIEW_INTENT_MAX_BUDGET_USD,
+        max_turns=limits.REVIEW_INTENT_MAX_TURNS,
+        max_budget_usd=limits.REVIEW_INTENT_MAX_BUDGET_USD,
     )
 
     assert options.max_turns == 100
@@ -318,7 +318,7 @@ def test_retry_policy_is_one_shared_two_attempt_policy() -> None:
     assert agent.AGENT_RETRY.max_attempts == 2
     assert agent.AGENT_RETRY.retry_on is is_transient_agent_error
     assert agent.AGENT_RETRY.jitter is True
-    assert agent.NODE_TIMEOUT_SECONDS == 120  # the time budget in agent.py is computed from it
+    assert limits.NODE_TIMEOUT_SECONDS == 120  # the time budget in limits.py is computed from it
 
 
 @pytest.mark.skipif(not os.environ.get("ANTHROPIC_API_KEY"), reason="needs ANTHROPIC_API_KEY")

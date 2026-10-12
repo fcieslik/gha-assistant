@@ -1,15 +1,17 @@
 import asyncio
+import operator
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
+
+from langgraph.types import RetryPolicy
 
 from gha_assistant import agent
 from gha_assistant.change import file_diff
 from gha_assistant.finding import Finding
+from gha_assistant.limits import MAX_DIFF_CHARS
+from gha_assistant.nodes.degradable import compile_attempt
 from gha_assistant.state import ReviewState
-
-# A generated or vendored file can have a huge diff; past this the tail is cut and the
-# model is told so, rather than failing the whole attempt on the context limit.
-MAX_DIFF_CHARS = 60_000
 
 SYSTEM_PROMPT = agent.load_prompt("review_code")
 
@@ -43,6 +45,13 @@ class ReviewCodeInput(TypedDict):
     path: str
     base_ref: str
     repo_path: str
+
+
+class _CodeState(ReviewCodeInput, total=False):
+    """State of the one-node graph an attempt runs in (see `make_review_code`)."""
+
+    candidates: Annotated[list[Finding], operator.add]
+    warnings: Annotated[list[str], operator.add]
 
 
 def build_prompt(path: str, diff: str) -> str:
@@ -84,3 +93,39 @@ async def review_code(payload: ReviewCodeInput) -> ReviewState:
         label=f"review_code {path}",
     )
     return {"candidates": to_findings(path, output)}
+
+
+def degrade(state: _CodeState, exc: Exception) -> _CodeState:
+    """What is left of one file's review once its retries are used up: a warning, so the
+    other files' remarks stay."""
+    return {
+        "warnings": [
+            f"review_code nie powiódł się mimo ponowień ({type(exc).__name__}): "
+            f"plik {state['path']} nie został sprawdzony"
+        ]
+    }
+
+
+def make_review_code(
+    retry_policy: RetryPolicy, timeout: float
+) -> Callable[[ReviewCodeInput], Awaitable[ReviewState]]:
+    """The `review_code` node: `review_code` above is one attempt, run with the retry
+    policy, the timeout and a warning instead of a failed run."""
+    compiled = compile_attempt(_CodeState, review_code, degrade, retry_policy, timeout)
+
+    async def review_code_with_degradation(payload: ReviewCodeInput) -> ReviewState:
+        result = await compiled.ainvoke(
+            {
+                "path": payload["path"],
+                "base_ref": payload["base_ref"],
+                "repo_path": payload["repo_path"],
+            }
+        )
+        # Only what the attempt produced: the nested graph started with empty
+        # `candidates` and `warnings`, so these are the new ones.
+        return {
+            "candidates": result.get("candidates", []),
+            "warnings": result.get("warnings", []),
+        }
+
+    return review_code_with_degradation

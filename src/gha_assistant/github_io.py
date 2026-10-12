@@ -3,6 +3,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -44,14 +45,40 @@ def reviewed_status(files: int, findings: int) -> str:
     return f"sprawdzono plików: {files}, {verdict}"
 
 
+# The comment shows this many warnings and counts the rest.
+MAX_WARNINGS_SHOWN = 10
+_WARNING_CHARS = 200
+
+
+def _warning_line(text: str) -> str:
+    """One warning as one line in a code span. Warnings may carry text that came from the
+    model or from the PR (paths, Finding ids), and the comment is public: a code span
+    keeps `@nick`, links and HTML from being rendered."""
+    cleaned = "".join(c if c.isprintable() else " " for c in text).replace("`", "'")
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > _WARNING_CHARS:
+        cleaned = cleaned[: _WARNING_CHARS - 1] + "…"
+    return f"- `{cleaned}`"
+
+
 def render_status_comment(
-    status: str, *, head_sha: str | None, now: datetime, summary: str = ""
+    status: str,
+    *,
+    head_sha: str | None,
+    now: datetime,
+    summary: str = "",
+    warnings: Sequence[str] = (),
 ) -> str:
     """Comment text without the marker. Each run overwrites the previous one, so the
     commit and time say which result the reader is looking at."""
     lines = [f"**gha-assistant:** {status}"]
     if summary:
         lines += ["", summary]
+    if warnings:
+        shown = warnings[:MAX_WARNINGS_SHOWN]
+        lines += ["", "**Ostrzeżenia:**", *(_warning_line(w) for w in shown)]
+        if len(warnings) > len(shown):
+            lines.append(f"- i {len(warnings) - len(shown)} więcej")
     commit = f"commit `{head_sha[:7]}`, " if head_sha else ""
     lines += ["", f"<sub>{commit}{now:%Y-%m-%d %H:%M} UTC</sub>"]
     return "\n".join(lines)
@@ -115,14 +142,18 @@ def upsert_comment(repo: str, pr_number: int, body: str, token: str) -> None:
         )
 
 
-def publish_status_comment(state: ReviewState, status: str, summary: str = "") -> None:
+def publish_status_comment(
+    state: ReviewState, status: str, summary: str = "", warnings: Sequence[str] = ()
+) -> None:
     """Leave the run's status in the PR, or print it when `dry_run` is set.
 
     Without `dry_run` a missing target or token raises, so a green run always means
     the comment exists.
     """
     head_sha = state.get("head_sha")
-    body = render_status_comment(status, head_sha=head_sha, now=datetime.now(UTC), summary=summary)
+    body = render_status_comment(
+        status, head_sha=head_sha, now=datetime.now(UTC), summary=summary, warnings=warnings
+    )
     if state.get("dry_run"):
         print(body)
         return
