@@ -117,6 +117,17 @@ def test_options_allow_reading_only_and_ignore_the_reviewed_repos_settings(
     assert options.output_format == {"type": "json_schema", "schema": SCHEMA}
 
 
+def test_a_node_can_raise_the_turn_and_budget_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    options = _options_for(
+        monkeypatch,
+        max_turns=agent.REVIEW_INTENT_MAX_TURNS,
+        max_budget_usd=agent.REVIEW_INTENT_MAX_BUDGET_USD,
+    )
+
+    assert options.max_turns == 100
+    assert options.max_budget_usd == 0.75
+
+
 def test_judge_gets_no_tools_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
     options = _options_for(monkeypatch, tools=[])
 

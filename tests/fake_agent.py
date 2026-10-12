@@ -8,9 +8,8 @@ from gha_assistant import agent
 
 Output = dict[str, Any]
 
-STUB_OUTPUT: Output = {
-    "findings": [{"severity": "low", "message": "stub remark", "line": 1, "evidence": "x"}]
-}
+# Line 1 exists in every file the tests create; no quote, so it needs no particular content.
+STUB_OUTPUT: Output = {"findings": [{"severity": "low", "message": "stub remark", "line": 1}]}
 
 
 @dataclass

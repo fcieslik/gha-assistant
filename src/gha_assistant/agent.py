@@ -38,6 +38,11 @@ EFFORT = "medium"  # every agent, so cost and latency do not depend on the model
 # `error_max_budget_usd`, which is permanent (a retry would only spend it again).
 MAX_BUDGET_USD = 0.5
 
+# `review_intent` is the one agent that is meant to go through every changed file in one
+# run, so it gets more room than the per-file and per-Finding agents (30 turns, $0.5).
+REVIEW_INTENT_MAX_TURNS = 100
+REVIEW_INTENT_MAX_BUDGET_USD = 0.75
+
 # Per attempt, enforced on the node (`add_node(timeout=...)`), not here: LangGraph
 # raises NodeTimeoutError there, and the cancelled `query()` takes the CLI with it
 # (spike: the child process was gone right after the cancellation).
@@ -165,6 +170,7 @@ def build_options(
     system_prompt: str,
     output_schema: dict[str, Any],
     max_turns: int,
+    max_budget_usd: float,
     tools: Sequence[str],
     cwd: str | Path | None,
 ) -> ClaudeAgentOptions:
@@ -181,7 +187,7 @@ def build_options(
         system_prompt=f"{load_prompt('rules')}\n\n{system_prompt}",
         output_format={"type": "json_schema", "schema": output_schema},
         max_turns=max_turns,
-        max_budget_usd=MAX_BUDGET_USD,
+        max_budget_usd=max_budget_usd,
         effort=EFFORT,
         # A fallback equal to the model is rejected by the CLI.
         fallback_model=FALLBACK_MODEL if model != FALLBACK_MODEL else None,
@@ -196,6 +202,7 @@ async def run_agent(
     prompt: str,
     output_schema: dict[str, Any],
     max_turns: int = DEFAULT_MAX_TURNS,
+    max_budget_usd: float = MAX_BUDGET_USD,
     tools: Sequence[str] = READ_ONLY_TOOLS,
     cwd: str | Path | None = None,
     label: str = "agent",
@@ -211,6 +218,7 @@ async def run_agent(
         system_prompt=system_prompt,
         output_schema=output_schema,
         max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
         tools=tools,
         cwd=cwd,
     )

@@ -629,7 +629,14 @@ def test_most_severe_findings_are_verified_first(
 ) -> None:
     async def graded_review_code(payload: dict[str, str]) -> dict[str, list[Any]]:
         severity = "high" if payload["path"] == "src/m3.py" else "low"
-        finding = {"id": payload["path"], "source": "code", "severity": severity, "message": "m"}
+        finding = {
+            "id": payload["path"],
+            "source": "code",
+            "severity": severity,
+            "message": "m",
+            "file": payload["path"],
+            "line": 1,
+        }
         return {"candidates": [finding]}
 
     monkeypatch.setattr(graph_module, "review_code", graded_review_code)
@@ -639,6 +646,38 @@ def test_most_severe_findings_are_verified_first(
     result = _invoke(_pr_input(repo))
 
     assert [v["finding_id"] for v in result["verdicts"]] == ["src/m3.py"]
+
+
+def test_finding_about_a_file_outside_the_change_never_reaches_the_review(
+    git_repo: Callable[[str], GitRepo],
+    fake_github: FakeGitHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = {
+        "id": "code:src/a.py:1:1",
+        "source": "code",
+        "severity": "high",
+        "message": "real remark",
+        "file": "src/a.py",
+        "line": 1,
+        "evidence": "# src/a.py",
+    }
+    invented = {**real, "id": "code:src/ghost.py:1:2", "file": "src/ghost.py"}
+
+    async def inventive_review_code(payload: dict[str, str]) -> dict[str, list[Any]]:
+        return {"candidates": [real, invented]}
+
+    monkeypatch.setattr(graph_module, "review_code", inventive_review_code)
+    repo = _pr_with_files(git_repo, code=["src/a.py"])
+
+    result = _invoke(_pr_input(repo))
+
+    assert [f["id"] for f in result["validated"]] == [real["id"]]
+    assert [f["id"] for f in result["findings"]] == [real["id"]]
+    assert [v["finding_id"] for v in result["verdicts"]] == [real["id"]]
+    (warning,) = result["warnings"]
+    assert invented["id"] in warning
+    assert "src/ghost.py" in warning
 
 
 def test_concurrency_is_bounded_by_the_constant(
