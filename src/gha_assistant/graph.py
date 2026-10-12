@@ -10,7 +10,7 @@ from gha_assistant.nodes.publish import publish
 from gha_assistant.nodes.review_code import review_code
 from gha_assistant.nodes.review_intent import make_review_intent
 from gha_assistant.nodes.validate_findings import route_after_validation, validate_findings
-from gha_assistant.nodes.verify_finding import verify_finding
+from gha_assistant.nodes.verify_finding import make_verify_finding
 from gha_assistant.state import ReviewState
 
 # Upper bound on nodes running at once; `Send` workers are what hit it.
@@ -28,7 +28,7 @@ def build_graph() -> CompiledStateGraph:
         "review_intent", make_review_intent(AGENT_RETRY, REVIEW_INTENT_TIMEOUT_SECONDS)
     )
     builder.add_node("validate_findings", validate_findings)
-    builder.add_node("verify_finding", verify_finding)
+    builder.add_node("verify_finding", make_verify_finding(AGENT_RETRY, NODE_TIMEOUT_SECONDS))
     builder.add_node("judge_findings", judge_findings)
     builder.add_node("publish", publish, retry_policy=GITHUB_RETRY)
     builder.add_node("nothing_to_review", nothing_to_review, retry_policy=GITHUB_RETRY)
@@ -43,9 +43,10 @@ def build_graph() -> CompiledStateGraph:
     # same step, so validate_findings still runs once, after all of them.
     builder.add_edge("review_code", "validate_findings")
     builder.add_edge("review_intent", "validate_findings")
-    # No Findings goes straight to publish; otherwise one verify_finding per Finding.
+    # No Findings goes straight to publish, no `high` one to the judge; otherwise one
+    # verify_finding per `high` Finding.
     builder.add_conditional_edges(
-        "validate_findings", route_after_validation, ["verify_finding", "publish"]
+        "validate_findings", route_after_validation, ["verify_finding", "judge_findings", "publish"]
     )
     builder.add_edge("verify_finding", "judge_findings")
     builder.add_edge("judge_findings", "publish")

@@ -1,6 +1,6 @@
 # Architektura: przepływ grafu LangGraph
 
-Stan na ticket 06 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
+Stan na ticket 07 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
 
 ```
                               START
@@ -29,29 +29,29 @@ Stan na ticket 06 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
                                  │ spec_ref, duplikat│
                                  └─────────┬─────────┘
                                            │ route_after_validation
-                        ┌──────────────────┴───────────────────┐
-                        │ validated == []                      │ validated != []
-                        │                                      ▼ Send × M (max 20,
-                        │                                      │ najpoważniejsze pierwsze)
-                        │                       ┌──────────────┴─────────────┐
-                        │                       ▼                            ▼
-                        │              ┌────────────────┐           ┌────────────────┐
-                        │              │ verify_finding │    ...    │ verify_finding │
-                        │              │   STUB         │           │   STUB         │
-                        │              └───────┬────────┘           └───────┬────────┘
-                        │                      └──────── verdicts ──────────┘
-                        │                                   ▼
-                        │                         ┌────────────────┐
-                        │                         │ judge_findings │  STUB
-                        │                         └────────┬───────┘  findings + summary
-                        │                                  │
-                        └───────────────┐   ┌──────────────┘
-                                        ▼   ▼
-                                    ┌─────────┐
-                                    │ publish │  upsert komentarza ze statusem
-                                    └────┬────┘  retry: GitHub (3 próby)
-                                         ▼
-                                        END
+             ┌─────────────────────────────┼──────────────────────────────┐
+             │ validated == []             │ validated != [],             │ są Findings `high`
+             │                             │ żaden nie jest `high`        ▼ Send × M (tylko
+             │                             │                              │ `high`, max 10)
+             │                             │               ┌──────────────┴─────────────┐
+             │                             │               ▼                            ▼
+             │                             │      ┌────────────────┐           ┌────────────────┐
+             │                             │      │ verify_finding │    ...    │ verify_finding │
+             │                             │      │ Sonnet, 1 run  │           │ Sonnet, 1 run  │
+             │                             │      └───────┬────────┘           └───────┬────────┘
+             │                             │              └──────── verdicts ──────────┘
+             │                             │                           ▼
+             │                             │                 ┌────────────────┐
+             │                             └────────────────►│ judge_findings │  STUB
+             │                                               └────────┬───────┘  findings + summary
+             │                                                        │
+             └──────────────────┐         ┌───────────────────────────┘
+                                ▼         ▼
+                            ┌─────────┐
+                            │ publish │  upsert komentarza ze statusem
+                            └────┬────┘  retry: GitHub (3 próby)
+                                 ▼
+                                END
 ```
 
 ## Co jest prawdziwe, a co stubem
@@ -63,8 +63,8 @@ Stan na ticket 06 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 | `review_code` | prawdziwy: Haiku, `AGENT_RETRY`, timeout 120 s | 04 |
 | `validate_findings` | prawdziwy, czysta funkcja | 05 |
 | `review_intent` | prawdziwy: Haiku, jedno przejście (100 tur, $0.75), `AGENT_RETRY`, timeout 300 s, po wyczerpaniu ostrzeżenie (graf zagnieżdżony z `error_handler`) | 06 |
-| `verify_finding` | stub (zawsze `confirmed`) | 07 |
-| `judge_findings` | stub (`"stub summary"`) | 08 |
+| `verify_finding` | prawdziwy: Sonnet, tylko Findings `high`, `AGENT_RETRY`, timeout 120 s, po wyczerpaniu `inconclusive` + ostrzeżenie (graf zagnieżdżony z `error_handler`) | 07 |
+| `judge_findings` | stub (zostawia wszystko, `"stub summary"`) | 08 |
 
 ## Parametry grafu
 
@@ -72,5 +72,6 @@ Stan na ticket 06 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 |---|---|
 | Współbieżność | `max_concurrency=5` |
 | Reducery | `candidates`, `verdicts`, `warnings` (łączenie list) |
-| Limit weryfikacji | 20 Findings, najpoważniejsze pierwsze, reszta idzie do sędziego niezweryfikowana |
+| Limit weryfikacji | tylko Findings `high`, max 10; `medium`, `low` i `high` ponad limit idą do sędziego niezweryfikowane |
 | Pusta lista po walidacji | jawny routing do `publish`, bo pusty `Send` zakończyłby graf bez publikacji |
+| Brak `high` po walidacji | jawny routing do `judge_findings` z tego samego powodu |

@@ -7,8 +7,9 @@ from langgraph.types import Send
 from gha_assistant.finding import Finding
 from gha_assistant.state import ReviewState
 
-# Verifications are capped; the rest of the Findings go on to the judge unverified.
-MAX_VERIFICATIONS = 20
+# Only `high` Findings are verified, and at most this many; every other Finding goes on
+# to the judge unverified.
+MAX_VERIFICATIONS = 10
 
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
@@ -111,18 +112,18 @@ def _read_lines(path: Path) -> list[str]:
     return lines
 
 
-def route_after_validation(state: ReviewState) -> Literal["publish"] | list[Send]:
+def route_after_validation(state: ReviewState) -> Literal["publish", "judge_findings"] | list[Send]:
     """Next step once the Findings are validated.
 
-    An empty list of `Send` would end the branch and the graph without reaching
-    `publish`, so "no Findings" is routed explicitly.
+    Only `high` Findings are verified. An empty list of `Send` would end the branch and
+    the graph without reaching the next node, so each "nothing to verify" case is routed
+    explicitly: no Findings at all goes to `publish`, no `high` one to `judge_findings`.
     """
     validated = state.get("validated", [])
     if not validated:
         return "publish"
-    return [Send("verify_finding", {"finding": f}) for f in _most_severe_first(validated)]
-
-
-def _most_severe_first(findings: list[Finding]) -> list[Finding]:
-    ranked = sorted(findings, key=lambda f: _SEVERITY_RANK[f["severity"]])
-    return ranked[:MAX_VERIFICATIONS]
+    high = [f for f in validated if f["severity"] == "high"][:MAX_VERIFICATIONS]
+    if not high:
+        return "judge_findings"
+    repo_path = state["repo_path"]
+    return [Send("verify_finding", {"finding": f, "repo_path": repo_path}) for f in high]
