@@ -17,6 +17,7 @@ from gha_assistant import graph as graph_module
 from gha_assistant.change import Change, collect_change
 from gha_assistant.graph import build_graph
 from gha_assistant.nodes import collect_input as collect_input_module
+from gha_assistant.nodes import judge_findings as judge_findings_module
 from gha_assistant.nodes import review_code as review_code_module
 from gha_assistant.nodes import validate_findings as validate_findings_module
 
@@ -365,7 +366,7 @@ def test_pr_with_code_leaves_one_comment_with_summary(
     assert len(fake_github.comments) == 1
     body = fake_github.comments[0]["body"]
     assert "sprawdzono plików: 2, uwagi: 2" in body
-    assert "stub summary" in body
+    assert "Wg wagi: 2 low" in body
 
 
 def test_second_run_on_the_same_pr_edits_the_comment(
@@ -571,7 +572,7 @@ def test_reducer_keeps_every_reviewers_remarks(
         "spec:1",
     }
     assert len(result["findings"]) == 3
-    assert result["summary"] == "stub summary"
+    assert result["summary"] == "Wg wagi: 1 medium, 2 low"
 
 
 def _high(call: dict[str, Any]) -> dict[str, Any]:
@@ -661,6 +662,49 @@ def test_verification_is_capped_and_the_rest_goes_on_unverified(
     assert len(fake_agent.verify_calls()) == 2
     assert len(result["verdicts"]) == 2
     assert len(result["findings"]) == 5
+
+
+def test_a_refuted_finding_does_not_reach_the_review(
+    git_repo: Callable[[str], GitRepo], fake_github: FakeGitHub, fake_agent: FakeAgent
+) -> None:
+    def refute_b(call: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "verdict": "refuted" if "src/b.py" in call["prompt"] else "confirmed",
+            "reason": "r",
+        }
+
+    fake_agent.respond = _high
+    fake_agent.respond_verify = refute_b
+    repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py"])
+
+    result = _invoke(_pr_input(repo))
+
+    assert [f["id"] for f in result["findings"]] == ["code:src/a.py:1:1"]
+    assert "obalone przez weryfikatora i odrzucone: 1" in result["summary"]
+    assert "uwagi: 1" in fake_github.comments[0]["body"]
+
+
+def test_the_review_is_capped_at_the_most_severe_findings(
+    git_repo: Callable[[str], GitRepo],
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(judge_findings_module, "MAX_FINDINGS", 2)
+
+    def graded(call: dict[str, Any]) -> dict[str, Any]:
+        severity = "high" if call["prompt"].startswith("File: src/m3.py\n") else "low"
+        return {"findings": [{"severity": severity, "message": "m", "line": 1}]}
+
+    fake_agent.respond = graded
+    repo = _pr_with_files(git_repo, code=[f"src/m{n}.py" for n in range(5)])
+
+    result = _invoke(_pr_input(repo))
+
+    assert len(result["validated"]) == 5
+    assert len(result["findings"]) == 2
+    assert result["findings"][0]["id"] == "code:src/m3.py:1:1"
+    assert "uwagi: 2" in fake_github.comments[0]["body"]
 
 
 def test_the_cap_on_verifications_is_ten() -> None:
@@ -1095,7 +1139,7 @@ def test_verify_finding_gets_the_finding_as_data_and_the_default_limits(
     assert result["verdicts"] == [
         {"finding_id": "code:src/a.py:1:1", "verdict": "refuted", "reason": "nie ma błędu"}
     ]
-    assert result["findings"][0]["id"] == "code:src/a.py:1:1"
+    assert result["findings"] == []  # refuted: recorded as a verdict, not in the Review
 
 
 def test_verdict_is_tied_to_its_finding_by_id_not_by_the_model(

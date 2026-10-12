@@ -1,6 +1,6 @@
 # Architektura: przepływ grafu LangGraph
 
-Stan na ticket 07 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
+Stan na ticket 08 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
 
 ```
                               START
@@ -42,8 +42,8 @@ Stan na ticket 07 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
              │                             │              └──────── verdicts ──────────┘
              │                             │                           ▼
              │                             │                 ┌────────────────┐
-             │                             └────────────────►│ judge_findings │  STUB
-             │                                               └────────┬───────┘  findings + summary
+             │                             └────────────────►│ judge_findings │  bez modelu
+             │                                               └────────┬───────┘  refuted out, sort, limit
              │                                                        │
              └──────────────────┐         ┌───────────────────────────┘
                                 ▼         ▼
@@ -64,7 +64,7 @@ Stan na ticket 07 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 | `validate_findings` | prawdziwy, czysta funkcja | 05 |
 | `review_intent` | prawdziwy: Haiku, jedno przejście (100 tur, $0.75), `AGENT_RETRY`, timeout 300 s, po wyczerpaniu ostrzeżenie (graf zagnieżdżony z `error_handler`) | 06 |
 | `verify_finding` | prawdziwy: Sonnet, tylko Findings `high`, `AGENT_RETRY`, timeout 120 s, po wyczerpaniu `inconclusive` + ostrzeżenie (graf zagnieżdżony z `error_handler`) | 07 |
-| `judge_findings` | stub (zostawia wszystko, `"stub summary"`) | 08 |
+| `judge_findings` | prawdziwy, czysta funkcja bez modelu: odrzuca `refuted`, sortuje wg wagi, tnie do 15, `summary` z liczb | 08 |
 
 ## Parametry grafu
 
@@ -72,6 +72,7 @@ Stan na ticket 07 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 |---|---|
 | Współbieżność | `max_concurrency=5` |
 | Reducery | `candidates`, `verdicts`, `warnings` (łączenie list) |
-| Limit weryfikacji | tylko Findings `high`, max 10; `medium`, `low` i `high` ponad limit idą do sędziego niezweryfikowane |
+| Limit weryfikacji | tylko Findings `high`, max 10; `medium`, `low` i `high` ponad limit idą do `judge_findings` niezweryfikowane |
+| Limit Review | `MAX_FINDINGS = 15`, zostają najpoważniejsze |
 | Pusta lista po walidacji | jawny routing do `publish`, bo pusty `Send` zakończyłby graf bez publikacji |
 | Brak `high` po walidacji | jawny routing do `judge_findings` z tego samego powodu |

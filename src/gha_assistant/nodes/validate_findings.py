@@ -4,14 +4,12 @@ from typing import Literal
 
 from langgraph.types import Send
 
-from gha_assistant.finding import Finding
+from gha_assistant.finding import SEVERITY_RANK, Finding
 from gha_assistant.state import ReviewState
 
 # Only `high` Findings are verified, and at most this many; every other Finding goes on
-# to the judge unverified.
+# to the end of the review unverified.
 MAX_VERIFICATIONS = 10
-
-_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 
 def validate_findings(state: ReviewState) -> ReviewState:
@@ -60,7 +58,7 @@ def check_findings(
             continue
         # The same place and source twice: one stays, the more severe of the two.
         dropped = finding
-        if _SEVERITY_RANK[finding["severity"]] < _SEVERITY_RANK[earlier["severity"]]:
+        if SEVERITY_RANK[finding["severity"]] < SEVERITY_RANK[earlier["severity"]]:
             kept[key], dropped = finding, earlier
         warnings.append(f"odrzucono uwagę {dropped['id']}: duplikat uwagi z tego samego miejsca")
     return list(kept.values()), warnings

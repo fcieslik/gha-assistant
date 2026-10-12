@@ -4,6 +4,9 @@ Severity = Literal["low", "medium", "high"]
 Source = Literal["spec", "code"]
 VerdictKind = Literal["confirmed", "refuted", "inconclusive"]
 
+# Lower is more severe; sort by it to put the most severe first.
+SEVERITY_RANK: dict[Severity, int] = {"high": 0, "medium": 1, "low": 2}
+
 
 class Finding(TypedDict):
     """One remark about the PR, in the same shape at every stage of the graph.

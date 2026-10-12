@@ -28,7 +28,6 @@ from langgraph.types import RetryPolicy
 
 REVIEW_MODEL = "claude-haiku-5-5"  # review_code, review_intent: many cheap reads
 VERIFY_MODEL = "claude-sonnet-5-5"  # verify_finding: checks one claim, must be reliable
-JUDGE_MODEL = "claude-sonnet-5-5"  # judge_findings: sees every Finding at once
 FALLBACK_MODEL = "claude-sonnet-5-5"
 
 READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
