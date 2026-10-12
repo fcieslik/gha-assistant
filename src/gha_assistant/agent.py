@@ -48,6 +48,14 @@ REVIEW_INTENT_MAX_BUDGET_USD = 0.75
 # (spike: the child process was gone right after the cancellation).
 NODE_TIMEOUT_SECONDS = 120
 
+# `review_intent` goes through every changed file in one run (up to 100 turns), so one
+# attempt gets 5 min. AGENT_MAX_ATTEMPTS attempts take 10 min in the worst case, in
+# parallel with the `review_code` workers; verify, judge and publish still have to fit in
+# the remaining 5 of the runner's 15 min. A run cut short by this is retried and costs
+# another budget (up to 2 x REVIEW_INTENT_MAX_BUDGET_USD). 100 turns of Haiku can take
+# longer than 5 min: not measured, only one small file set was tried.
+REVIEW_INTENT_TIMEOUT_SECONDS = 300
+
 # Time budget. One attempt gets 2 min and AGENT_RETRY allows 2 attempts, so a node can
 # take 4 min plus backoff. `review_code` workers run `max_concurrency` (5) at a time, so
 # N files take ceil(N/5) rounds. Measured without failures: ~6 s for a file with a 9-line

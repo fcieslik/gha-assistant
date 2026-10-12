@@ -856,3 +856,182 @@ def test_agent_run_that_hangs_hits_the_node_timeout_and_is_retried(
     _invoke(_pr_input(repo))
 
     assert calls == 2
+
+
+def _intent_pr(git_repo: Callable[[str], GitRepo]) -> GitRepo:
+    return _pr_with_files(git_repo, code=["src/a.py"], intent=[".scratch/feature/spec.md"])
+
+
+def test_review_intent_turns_the_answer_into_spec_findings(
+    git_repo: Callable[[str], GitRepo], fake_github: FakeGitHub, fake_agent: FakeAgent
+) -> None:
+    repo = _intent_pr(git_repo)
+    fake_agent.respond = lambda call: {
+        "findings": [
+            {
+                "severity": "high",
+                "message": "criterion 2 is not implemented",
+                "spec_ref": '.scratch/feature/spec.md: "the result is logged"',
+            },
+            {
+                "severity": "low",
+                "message": "export nobody asked for",
+                "spec_ref": ".scratch/feature/spec.md: poza zakresem",
+                "file": "src/a.py",
+                "line": 1,
+                "evidence": "# src/a.py",
+            },
+        ]
+        if call["label"] == "review_intent"
+        else []
+    }
+
+    result = _invoke(_pr_input(repo))
+
+    general, anchored = result["candidates"]
+    assert general == {
+        "id": "spec:1",
+        "source": "spec",
+        "severity": "high",
+        "message": "criterion 2 is not implemented",
+        "spec_ref": '.scratch/feature/spec.md: "the result is logged"',
+    }
+    assert anchored["id"] == "spec:2"
+    assert (anchored["file"], anchored["line"], anchored["evidence"]) == (
+        "src/a.py",
+        1,
+        "# src/a.py",
+    )
+
+
+def test_review_intent_gets_the_blocks_its_prompt_describes_and_the_wide_limits(
+    git_repo: Callable[[str], GitRepo], fake_github: FakeGitHub, fake_agent: FakeAgent
+) -> None:
+    repo = _intent_pr(git_repo)
+
+    _invoke(_pr_input(repo, pr_title="Add the thing", pr_body="Closes the ticket"))
+
+    (call,) = fake_agent.intent_calls()
+    prompt = call["prompt"]
+    assert "<intent_files>\n.scratch/feature/spec.md\n</intent_files>" in prompt
+    assert "<changed_files>\nsrc/a.py\n</changed_files>" in prompt
+    assert '<diff path="src/a.py">\n' in prompt
+    assert "+# src/a.py" in prompt
+    assert "<pr>\nTitle: Add the thing\n\nCloses the ticket\n</pr>" in prompt
+    # The Intent file is read with a tool: its content is not in the message.
+    assert "# .scratch/feature/spec.md" not in prompt
+    assert call["model"] == agent.REVIEW_MODEL
+    assert call["max_turns"] == agent.REVIEW_INTENT_MAX_TURNS == 100
+    assert call["max_budget_usd"] == agent.REVIEW_INTENT_MAX_BUDGET_USD == 0.75
+    assert call["cwd"] == str(repo.path)
+
+
+def test_pr_without_intent_files_never_calls_review_intent(
+    git_repo: Callable[[str], GitRepo], fake_github: FakeGitHub, fake_agent: FakeAgent
+) -> None:
+    repo = _pr_with_files(git_repo, code=["src/a.py", "src/b.py"])
+
+    _invoke(_pr_input(repo, pr_title="Implements .scratch/feature/spec.md"))
+
+    assert fake_agent.intent_calls() == []
+    assert len(fake_agent.calls) == 2
+
+
+# The nested graph behind `review_intent` is deliberate: a plain `error_handler` on the
+# node still re-raises the original error when `review_code` workers ran in the same
+# step (langgraph 1.2.14, checked with a spike). These tests are what keeps it that way.
+def test_review_intent_that_keeps_failing_degrades_to_a_warning(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _intent_pr(git_repo)
+    fake_agent.respond = lambda call: (
+        _api_error(529)
+        if call["label"] == "review_intent"
+        else {
+            "findings": [
+                {
+                    "severity": "low",
+                    "message": "code remark",
+                    "line": 1,
+                }
+            ]
+        }
+    )
+
+    result = _invoke(_pr_input(repo))
+
+    assert len(fake_agent.intent_calls()) == 2
+    assert [f["source"] for f in result["candidates"]] == ["code"]
+    (warning,) = result["warnings"]
+    assert "review_intent" in warning
+    assert "ResultError" in warning
+    assert len(fake_github.comments) == 1
+
+
+def test_review_intent_that_hangs_hits_its_own_timeout_and_degrades(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    monkeypatch.setattr(graph_module, "REVIEW_INTENT_TIMEOUT_SECONDS", 0.05)
+    repo = _intent_pr(git_repo)
+    intent_calls = 0
+
+    async def hangs_for_intent(**kwargs: Any) -> dict[str, Any]:
+        nonlocal intent_calls
+        if kwargs["label"] == "review_intent":
+            intent_calls += 1
+            await asyncio.sleep(5)
+        return {"findings": []}
+
+    monkeypatch.setattr(agent, "run_agent", hangs_for_intent)
+
+    result = _invoke(_pr_input(repo))
+
+    assert intent_calls == 2
+    (warning,) = result["warnings"]
+    assert "NodeTimeoutError" in warning
+
+
+def test_review_intent_that_recovers_on_the_second_attempt_has_no_warning(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _intent_pr(git_repo)
+    attempts = iter([_api_error(429), {"findings": []}])
+    fake_agent.respond = lambda call: (
+        next(attempts) if call["label"] == "review_intent" else {"findings": []}
+    )
+
+    result = _invoke(_pr_input(repo))
+
+    assert len(fake_agent.intent_calls()) == 2
+    assert result.get("warnings", []) == []
+
+
+def test_permanent_review_intent_failure_still_fails_the_run(
+    git_repo: Callable[[str], GitRepo],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_github: FakeGitHub,
+    fake_agent: FakeAgent,
+) -> None:
+    _instant_agent_retry(monkeypatch)
+    repo = _intent_pr(git_repo)
+    fake_agent.respond = lambda call: (
+        _api_error(401) if call["label"] == "review_intent" else {"findings": []}
+    )
+
+    with pytest.raises(ResultError):
+        _invoke(_pr_input(repo))
+
+    assert len(fake_agent.intent_calls()) == 1
+    assert fake_github.comments == []

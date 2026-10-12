@@ -1,6 +1,6 @@
 # Architektura: przepływ grafu LangGraph
 
-Stan na ticket 05 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
+Stan na ticket 06 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assistant/graph.py`.
 
 ```
                               START
@@ -16,7 +16,7 @@ Stan na ticket 05 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
    ┌───────────────────┐   ┌─────────────┐  ┌─────────────┐   ┌───────────────┐
    │ nothing_to_review │   │ review_code │  │ review_code │   │ review_intent │
    │ komentarz: brak   │   │  plik 1     │  │  plik N     │   │  (1 na PR)    │
-   │ kodu do sprawdz.  │   │  Haiku      │  │  Haiku      │   │  STUB         │
+   │ kodu do sprawdz.  │   │  Haiku      │  │  Haiku      │   │  Haiku, 1 run │
    └─────────┬─────────┘   └──────┬──────┘  └──────┬──────┘   └───────┬───────┘
              │                    │  candidates (reducer: operator.add)
              ▼                    └────────┬───────┴──────────────────┘
@@ -62,7 +62,7 @@ Stan na ticket 05 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 | `nothing_to_review`, `publish` | prawdziwe (upsert komentarza, `dry_run`) | 02 |
 | `review_code` | prawdziwy: Haiku, `AGENT_RETRY`, timeout 120 s | 04 |
 | `validate_findings` | prawdziwy, czysta funkcja | 05 |
-| `review_intent` | stub (jedna uwaga ogólna) | 06 |
+| `review_intent` | prawdziwy: Haiku, jedno przejście (100 tur, $0.75), `AGENT_RETRY`, timeout 300 s, po wyczerpaniu ostrzeżenie (graf zagnieżdżony z `error_handler`) | 06 |
 | `verify_finding` | stub (zawsze `confirmed`) | 07 |
 | `judge_findings` | stub (`"stub summary"`) | 08 |
 

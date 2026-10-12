@@ -1,14 +1,14 @@
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from gha_assistant.agent import AGENT_RETRY, NODE_TIMEOUT_SECONDS
+from gha_assistant.agent import AGENT_RETRY, NODE_TIMEOUT_SECONDS, REVIEW_INTENT_TIMEOUT_SECONDS
 from gha_assistant.github_io import GITHUB_RETRY
 from gha_assistant.nodes.collect_input import COLLECT_INPUT_RETRY, collect_input
 from gha_assistant.nodes.judge_findings import judge_findings
 from gha_assistant.nodes.nothing_to_review import nothing_to_review
 from gha_assistant.nodes.publish import publish
 from gha_assistant.nodes.review_code import review_code
-from gha_assistant.nodes.review_intent import review_intent
+from gha_assistant.nodes.review_intent import make_review_intent
 from gha_assistant.nodes.validate_findings import route_after_validation, validate_findings
 from gha_assistant.nodes.verify_finding import verify_finding
 from gha_assistant.state import ReviewState
@@ -23,7 +23,10 @@ def build_graph() -> CompiledStateGraph:
     builder.add_node(
         "review_code", review_code, retry_policy=AGENT_RETRY, timeout=NODE_TIMEOUT_SECONDS
     )
-    builder.add_node("review_intent", review_intent)
+    # Built here, not at import: the retry policy and timeout are read when the graph is.
+    builder.add_node(
+        "review_intent", make_review_intent(AGENT_RETRY, REVIEW_INTENT_TIMEOUT_SECONDS)
+    )
     builder.add_node("validate_findings", validate_findings)
     builder.add_node("verify_finding", verify_finding)
     builder.add_node("judge_findings", judge_findings)
