@@ -139,11 +139,10 @@ def test_pr_with_only_docs_and_lockfile_ends_in_nothing_to_review(
     )
 
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "collect_input: hello world"
-    assert len(lines) == 2
-    assert lines[1].startswith("nothing_to_review:")
-    assert "3 ignored" in lines[1]
-    assert "1 intent" in lines[1]
+    assert len(lines) == 1
+    assert lines[0].startswith("nothing_to_review:")
+    assert "3 ignored" in lines[0]
+    assert "1 intent" in lines[0]
     assert "summary" not in result
     assert result["change"] == {
         "intent": [".scratch/feature/spec.md"],

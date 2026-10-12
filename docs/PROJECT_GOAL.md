@@ -16,8 +16,8 @@
 - **Checkout:** `actions/checkout` z `fetch-depth: 0`, żeby `git diff` do gałęzi bazowej działał.
 - **Zmienione pliki:** kod Pythona liczy `git diff --name-status -M origin/<base>...HEAD` przed uruchomieniem agenta i dzieli pliki na Intent (cel PR), kod do recenzji i ignorowane. Diff każdego pliku kod dokłada do promptu jako dane; agent doczytuje resztę narzędziami tylko do odczytu.
 - **Uprawnienia agenta:** tylko odczyt (`Read`, `Grep`, `Glob`), bez `Bash`, więc bez `git`, `git push`, `curl` i `gh`. Kod PR jest daną niezaufaną.
-- **Publikacja review:** robi kod Pythona, nie agent. Używa Pull Request Reviews API, zdarzenie `COMMENT`, jeden review z podsumowaniem i komentarzami przy liniach.
-- **Komentarz ze statusem:** każdy run kończy się jednym komentarzem w rozmowie PR (issue comment), żeby zielony run nie wyglądał jak run bez wyniku: "brak kodu do sprawdzenia" albo "sprawdzono N plików" z podsumowaniem, także gdy nie ma uwag. Komentarz jest rozpoznawany po ukrytym znaczniku i autorze będącym botem, a kolejny run edytuje go w miejscu zamiast dodawać nowy; treść zawiera SHA commita i czas, bo nadpisanie gubi poprzedni wynik. Token ze zmiennej `GITHUB_TOKEN`; brak tokenu lub celu bez `--dry-run` kończy run błędem. PR z forka (token tylko do odczytu) jest poza zakresem.
+- **Publikacja:** robi kod Pythona, nie agent. v1: jeden komentarz ze statusem (niżej). Później: Pull Request Reviews API, zdarzenie `COMMENT`, jeden review z komentarzami przy liniach.
+- **Komentarz ze statusem:** każdy run kończy się jednym komentarzem w rozmowie PR (issue comment), żeby zielony run nie wyglądał jak run bez wyniku: "brak kodu do sprawdzenia" albo "sprawdzono N plików" z podsumowaniem, także gdy nie ma uwag. Komentarz jest rozpoznawany po ukrytym znaczniku i autorze będącym botem, a kolejny run edytuje go w miejscu zamiast dodawać nowy; treść zawiera SHA commita i czas, bo nadpisanie gubi poprzedni wynik. Token ze zmiennej `GITHUB_TOKEN`; brak tokenu lub celu bez `--dry-run` kończy run błędem. Komentarz zawiera też listę Findings (waga, miejsce, treść, sugestia), każde pole jako jedna linia w code span, bo treść pochodzi z modelu i z PR, a komentarz jest publiczny. Komentarzy przy liniach (Reviews API) v1 nie ma. PR z forka (token tylko do odczytu, brak sekretów) jest pomijany bez błędu.
 - **Format wyniku modelu:** structured output (`Finding`: plik, linia, waga, treść, sugestia).
 - **Testowanie:** głównie lokalnie przez `--dry-run`. Graf ma osobne nody dla zbierania wejścia, recenzentów, walidacji, weryfikacji, zakończenia Review i publikacji (patrz „Przepływ grafu"). GitHub Actions służy do końcowego testu w repozytorium testowym, przed tagiem `v1`.
 - **Ochrona kosztów:** `timeout-minutes: 15` i `concurrency` z `cancel-in-progress: true`.
@@ -48,7 +48,7 @@ gha-assistant/
     │   ├── degradable.py         # wspólna próba z retry, timeoutem i degradacją
     │   └── publish.py
     ├── github_io.py       # komentarz ze statusem w PR (upsert); później Review
-    └── __main__.py        # punkt wejścia (CLI), jeszcze nie ma
+    └── __main__.py        # punkt wejścia: `python -m gha_assistant` (event PR -> stan -> graf)
 ```
 
 ## Plik w repozytorium docelowym
@@ -115,6 +115,6 @@ Szczegółowy diagram i stan nodów: `docs/ARCHITECTURE.md`. Limity i budżet cz
 3. **`validate_findings`** (kod, bez modelu) odrzuca Candidates wskazujące miejsca, których nie ma, i duplikaty z tego samego miejsca.
 4. **`verify_finding`** (Sonnet) sprawdza osobno każdy Finding `high` (max 10) i zwraca Verdict: `confirmed`, `refuted` albo `inconclusive`. Pozostałe Findings idą dalej niezweryfikowane.
 5. **`judge_findings`** (kod, bez modelu) zamyka Review: odrzuca Findings z Verdictem `refuted`, sortuje wg wagi, tnie do 15 i buduje `summary` z liczb.
-6. **`publish`** zostawia jeden komentarz ze statusem, `summary` i ostrzeżeniami o degradacji.
+6. **`publish`** zostawia jeden komentarz ze statusem, `summary`, listą Findings i ostrzeżeniami o degradacji.
 
-Awaria jednego recenzenta lub weryfikatora po retry nie kasuje reszty: node zapisuje ostrzeżenie (albo Verdict `inconclusive`), a komentarz je pokazuje. Błąd trwały (zły klucz API) kończy run błędem, bez komentarza.
+Awaria jednego recenzenta lub weryfikatora po retry nie kasuje reszty: node zapisuje ostrzeżenie (albo Verdict `inconclusive`), a komentarz je pokazuje. Błąd trwały (zły klucz API) kończy run błędem (kod 1, linia `::error::` z komunikatem SDK), bez komentarza. Brak klucza lub zły event kończy run kodem 2, bez wywołania modelu.

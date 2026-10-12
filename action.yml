@@ -1,0 +1,28 @@
+name: gha-assistant
+description: "Code review of a pull request by Claude. Leaves one status comment in the PR."
+
+inputs:
+  github-token:
+    description: "Token that posts the comment. Needs `pull-requests: write`."
+    default: ${{ github.token }}
+  anthropic-api-key:
+    description: Anthropic API key (keep it in a repository secret).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The caller's workflow must run `actions/checkout` with `fetch-depth: 0` first:
+    # the agent diffs `origin/<base>...HEAD` and reads files from that checkout.
+    - uses: astral-sh/setup-uv@v10.3.0
+      with:
+        enable-cache: false
+    - name: Review the pull request
+      shell: bash
+      # `--project` runs this repository's code and leaves the working directory on the
+      # caller's checkout, which is the code under review.
+      run: uv run --frozen --no-dev --project "$ACTION_PATH" python -m gha_assistant
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}

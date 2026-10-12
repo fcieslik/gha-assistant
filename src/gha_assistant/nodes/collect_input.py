@@ -55,7 +55,6 @@ def next_step(
 def collect_input(
     state: ReviewState,
 ) -> Command[Literal["review_code", "review_intent", "nothing_to_review"]]:
-    print("collect_input: hello world")
     missing = [key for key in ("base_ref", "repo_path") if not state.get(key)]
     if missing:
         raise ValueError(f"collect_input requires: {', '.join(missing)}")

@@ -6,6 +6,7 @@ import pytest
 from fake_github import FakeGitHub
 
 from gha_assistant import github_io
+from gha_assistant.finding import Finding
 from gha_assistant.github_io import (
     STATUS_MARKER,
     is_transient_github_error,
@@ -98,6 +99,66 @@ def test_render_caps_the_number_of_warnings() -> None:
 
 def test_render_without_warnings_has_no_warnings_section() -> None:
     assert "Ostrzeżenia" not in render_status_comment("status", head_sha=None, now=NOW)
+
+
+def _finding(**fields: object) -> Finding:
+    finding: dict[str, object] = {
+        "id": "f1",
+        "source": "code",
+        "severity": "high",
+        "message": "Wynik nie jest sprawdzany.",
+    }
+    finding.update(fields)
+    return finding  # type: ignore[return-value]
+
+
+def test_render_lists_findings_with_severity_place_message_and_suggestion() -> None:
+    finding = _finding(file="src/a.py", line=12, suggestion="Dodaj `if`.")
+
+    body = render_status_comment("status", head_sha=None, now=NOW, findings=[finding])
+
+    assert "**Uwagi:**" in body
+    assert "- **high** `src/a.py:12`" in body
+    assert "  `Wynik nie jest sprawdzany.`" in body
+    assert "  Sugestia: `Dodaj 'if'.`" in body
+
+
+def test_render_a_finding_without_a_place_is_a_general_remark() -> None:
+    finding = _finding(severity="medium", spec_ref=".scratch/x/spec.md: kryterium 2")
+
+    body = render_status_comment("status", head_sha=None, now=NOW, findings=[finding])
+
+    assert "- **medium** uwaga ogólna" in body
+    assert "  Wymaganie: `.scratch/x/spec.md: kryterium 2`" in body
+
+
+def test_render_a_finding_without_a_line_shows_only_the_file() -> None:
+    body = render_status_comment("status", head_sha=None, now=NOW, findings=[_finding(file="a.py")])
+
+    assert "- **high** `a.py`" in body
+
+
+def test_render_keeps_hostile_finding_text_inert() -> None:
+    hostile = "@octocat [link](http://x) ![](http://x/p.png) <img src=x>\n\x1b[31m" + "a" * 900
+    finding = _finding(message=hostile, suggestion=hostile, file="@octocat/<b>.py", line=3)
+
+    body = render_status_comment("status", head_sha=None, now=NOW, findings=[finding])
+
+    lines = [ln for ln in body.splitlines() if ln.startswith(("- ", "  "))]
+    assert len(lines) == 3
+    assert all("`" in ln and len(ln) < 700 for ln in lines)
+    assert lines[0].startswith("- **high** `@octocat/<b>.py:3`")
+    assert "\x1b" not in body
+
+
+def test_render_without_findings_has_no_findings_section() -> None:
+    assert "Uwagi" not in render_status_comment("status", head_sha=None, now=NOW)
+
+
+def test_publish_status_comment_posts_the_findings(fake_github: FakeGitHub) -> None:
+    publish_status_comment(_state(), "status", findings=[_finding(file="a.py", line=1)])
+
+    assert "- **high** `a.py:1`" in fake_github.comments[0]["body"]
 
 
 def test_status_variants() -> None:

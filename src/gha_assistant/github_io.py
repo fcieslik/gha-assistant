@@ -9,6 +9,7 @@ from typing import Any
 
 from langgraph.types import RetryPolicy
 
+from gha_assistant.finding import Finding
 from gha_assistant.state import ReviewState
 
 GITHUB_API = "https://api.github.com"
@@ -48,17 +49,44 @@ def reviewed_status(files: int, findings: int) -> str:
 # The comment shows this many warnings and counts the rest.
 MAX_WARNINGS_SHOWN = 10
 _WARNING_CHARS = 200
+_FILE_CHARS = 200
+_MESSAGE_CHARS = 600
+_SUGGESTION_CHARS = 400
 
 
-def _warning_line(text: str) -> str:
-    """One warning as one line in a code span. Warnings may carry text that came from the
-    model or from the PR (paths, Finding ids), and the comment is public: a code span
+def _code_span(text: str, limit: int) -> str:
+    """`text` as one line in a code span. It may carry text that came from the model or
+    from the PR (paths, messages, Finding ids), and the comment is public: a code span
     keeps `@nick`, links and HTML from being rendered."""
     cleaned = "".join(c if c.isprintable() else " " for c in text).replace("`", "'")
     cleaned = " ".join(cleaned.split())
-    if len(cleaned) > _WARNING_CHARS:
-        cleaned = cleaned[: _WARNING_CHARS - 1] + "…"
-    return f"- `{cleaned}`"
+    if len(cleaned) > limit:
+        cleaned = cleaned[: limit - 1] + "…"
+    return f"`{cleaned}`"
+
+
+def _warning_line(text: str) -> str:
+    return f"- {_code_span(text, _WARNING_CHARS)}"
+
+
+def _finding_lines(finding: Finding) -> list[str]:
+    """One Finding: severity and place on the first line, then message and suggestion."""
+    file = finding.get("file")
+    if not file:
+        place = "uwaga ogólna"
+    elif "line" in finding:
+        place = _code_span(f"{file}:{finding['line']}", _FILE_CHARS)
+    else:
+        place = _code_span(file, _FILE_CHARS)
+    lines = [
+        f"- **{finding['severity']}** {place}",
+        f"  {_code_span(finding['message'], _MESSAGE_CHARS)}",
+    ]
+    if suggestion := finding.get("suggestion"):
+        lines.append(f"  Sugestia: {_code_span(suggestion, _SUGGESTION_CHARS)}")
+    if spec_ref := finding.get("spec_ref"):
+        lines.append(f"  Wymaganie: {_code_span(spec_ref, _FILE_CHARS)}")
+    return lines
 
 
 def render_status_comment(
@@ -67,6 +95,7 @@ def render_status_comment(
     head_sha: str | None,
     now: datetime,
     summary: str = "",
+    findings: Sequence[Finding] = (),
     warnings: Sequence[str] = (),
 ) -> str:
     """Comment text without the marker. Each run overwrites the previous one, so the
@@ -74,6 +103,10 @@ def render_status_comment(
     lines = [f"**gha-assistant:** {status}"]
     if summary:
         lines += ["", summary]
+    if findings:
+        lines += ["", "**Uwagi:**"]
+        for finding in findings:
+            lines += _finding_lines(finding)
     if warnings:
         shown = warnings[:MAX_WARNINGS_SHOWN]
         lines += ["", "**Ostrzeżenia:**", *(_warning_line(w) for w in shown)]
@@ -143,7 +176,11 @@ def upsert_comment(repo: str, pr_number: int, body: str, token: str) -> None:
 
 
 def publish_status_comment(
-    state: ReviewState, status: str, summary: str = "", warnings: Sequence[str] = ()
+    state: ReviewState,
+    status: str,
+    summary: str = "",
+    findings: Sequence[Finding] = (),
+    warnings: Sequence[str] = (),
 ) -> None:
     """Leave the run's status in the PR, or print it when `dry_run` is set.
 
@@ -152,7 +189,12 @@ def publish_status_comment(
     """
     head_sha = state.get("head_sha")
     body = render_status_comment(
-        status, head_sha=head_sha, now=datetime.now(UTC), summary=summary, warnings=warnings
+        status,
+        head_sha=head_sha,
+        now=datetime.now(UTC),
+        summary=summary,
+        findings=findings,
+        warnings=warnings,
     )
     if state.get("dry_run"):
         print(body)

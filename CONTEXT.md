@@ -45,5 +45,5 @@ Jedna jednostka pracy do wykonania w PR, opisana własnym plikiem.
 _Avoid_: issue, task
 
 **Status comment**:
-Jeden komentarz w rozmowie PR, który każdy run tworzy albo nadpisuje: status runa (np. brak kodu do sprawdzenia) i `summary`. Nie jest Review ani Findingiem.
+Jeden komentarz w rozmowie PR, który każdy run tworzy albo nadpisuje: status runa (np. brak kodu do sprawdzenia), `summary`, lista Findings (każdy jako code span) i ostrzeżenia. Nie jest Review w sensie Reviews API: v1 nie ma komentarzy przy liniach.
 _Avoid_: Review, raport

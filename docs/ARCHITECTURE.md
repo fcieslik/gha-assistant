@@ -59,7 +59,7 @@ Stan na ticket 09 (`.scratch/review-agent/`). Źródło prawdy: `src/gha_assista
 | Node | Stan | Ticket |
 |---|---|---|
 | `collect_input` | prawdziwy | 01–03 |
-| `nothing_to_review`, `publish` | prawdziwe (upsert komentarza, `dry_run`) | 02 |
+| `nothing_to_review`, `publish` | prawdziwe (upsert komentarza z Findings i ostrzeżeniami, `dry_run`) | 02 |
 | `review_code` | prawdziwy: Haiku, `AGENT_RETRY`, timeout 120 s, po wyczerpaniu ostrzeżenie z nazwą pliku (graf zagnieżdżony z `error_handler`) | 04, 09 |
 | `validate_findings` | prawdziwy, czysta funkcja | 05 |
 | `review_intent` | prawdziwy: Haiku, jedno przejście (100 tur, $0.75), `AGENT_RETRY`, timeout 300 s, po wyczerpaniu ostrzeżenie (graf zagnieżdżony z `error_handler`) | 06 |
